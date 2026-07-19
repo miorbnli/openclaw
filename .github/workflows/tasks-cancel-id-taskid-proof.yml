@@ -65,7 +65,7 @@ jobs:
           set -euo pipefail
           artifact_dir=.artifacts/control-ui-e2e/tasks
           mkdir -p "$artifact_dir"
-          find "$artifact_dir" -type f -print0 | sort -z | xargs -0 -r sha256sum > "$artifact_dir/SHA256SUMS"
+          find "$artifact_dir" -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 -r sha256sum > "$artifact_dir/SHA256SUMS"
           cat > "$artifact_dir/manifest.json" <<'JSON'
           {
             "schemaVersion": 1,
