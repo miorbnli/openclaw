@@ -1,0 +1,86 @@
+name: Tasks Cancellation ID Proof
+
+on:
+  push:
+    branches: [proof/tasks-cancel-id-taskid]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tasks-cancel-id-taskid-proof-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+
+      - name: Install dependencies and Chromium
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          package_manager="$(node -p "require('./package.json').packageManager")"
+          corepack enable
+          corepack prepare "$package_manager" --activate
+          pnpm install --frozen-lockfile --config.engine-strict=false
+          pnpm --dir ui exec playwright install --with-deps chromium
+
+      - name: Fetch exact PR head
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            refs/heads/fix/task-cancel-id-taskid-key:refs/remotes/origin/fix/task-cancel-id-taskid-key
+          test "$(git rev-parse refs/remotes/origin/fix/task-cancel-id-taskid-key)" = "c11ae9d6fdee91cf85d5e1563be29d0807e4f0e3"
+          git checkout --force refs/remotes/origin/fix/task-cancel-id-taskid-key -- \
+            ui/src/pages/tasks/tasks-page.test.ts \
+            ui/src/pages/tasks/tasks.e2e.test.ts \
+            ui/src/pages/tasks/view.ts
+
+      - name: Run Tasks browser proof
+        env:
+          OPENCLAW_VITEST_MAX_WORKERS: "1"
+        run: |
+          set -euo pipefail
+          node scripts/run-vitest.mjs run \
+            --config test/vitest/vitest.ui-e2e.config.ts \
+            --configLoader runner \
+            ui/src/pages/tasks/tasks.e2e.test.ts
+
+      - name: Write evidence manifest
+        if: always()
+        run: |
+          set -euo pipefail
+          artifact_dir=.artifacts/control-ui-e2e/tasks
+          mkdir -p "$artifact_dir"
+          find "$artifact_dir" -type f -print0 | sort -z | xargs -0 -r sha256sum > "$artifact_dir/SHA256SUMS"
+          cat > "$artifact_dir/manifest.json" <<'JSON'
+          {
+            "schemaVersion": 1,
+            "environment": "GitHub-hosted Ubuntu 24.04, Node 24, Playwright Chromium, real Control UI /tasks route with deterministic mocked Gateway data",
+            "pullRequest": 108006,
+            "headSha": "c11ae9d6fdee91cf85d5e1563be29d0807e4f0e3",
+            "proof": "Distinct rowId/taskId cancellation request, in-flight disabled Cancelling state, screenshot, video, and redacted diagnostics"
+          }
+          JSON
+
+      - name: Upload Tasks browser proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tasks-cancel-id-taskid-proof
+          path: .artifacts/control-ui-e2e/tasks/
+          retention-days: 30
+          if-no-files-found: error
