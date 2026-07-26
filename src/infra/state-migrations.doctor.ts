@@ -1137,6 +1137,7 @@ export async function runLegacyStateMigrations(params: {
   );
   const notices = mergeNotices([
     pluginInstallIndex,
+    voiceWake,
     updateCheck,
     tuiLastSessions,
     commitments,
@@ -1492,6 +1493,7 @@ export async function autoMigrateLegacyState(params: {
       stateDirResult,
       detected,
       pluginInstallIndex,
+      voiceWake,
       updateCheck,
       deviceAuth,
       deviceIdentity,
@@ -1731,6 +1733,7 @@ export async function autoMigrateLegacyState(params: {
     stateDirResult,
     detected,
     pluginInstallIndex,
+    voiceWake,
     updateCheck,
     deviceAuth,
     deviceIdentity,
