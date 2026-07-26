@@ -97,15 +97,18 @@ jobs:
             bash -lc 'cp -r /candidate/. /tmp/work'
           printf '%s\n' '{"stage":"candidate copied into sandbox"}' > "$artifact_dir/proof-stage.json"
 
+          timeout --foreground --kill-after=30s 2m docker exec \
+            --env COREPACK_HOME=/cache/corepack \
+            "$container" \
+            corepack prepare pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065 --activate \
+            >/dev/null 2>&1
+          printf '%s\n' '{"stage":"package manager prepared"}' > "$artifact_dir/proof-stage.json"
+
           timeout --foreground --kill-after=30s 5m docker exec \
             --env COREPACK_HOME=/cache/corepack \
             "$container" \
-            bash -lc '
-              set -euo pipefail
-              cd /tmp/work
-              corepack prepare pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065 --activate
-              corepack pnpm install --frozen-lockfile --ignore-scripts --config.ignore-pnpmfile=true --store-dir /cache/store
-            ' >/dev/null 2>&1
+            bash -lc 'cd /tmp/work && corepack pnpm install --frozen-lockfile --ignore-scripts --config.ignore-pnpmfile=true --store-dir /cache/store' \
+            >/dev/null 2>&1
           printf '%s\n' '{"stage":"candidate dependencies installed"}' > "$artifact_dir/proof-stage.json"
 
           docker network disconnect bridge "$container"
