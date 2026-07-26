@@ -260,12 +260,14 @@ const verifyState = async (settingsDir) => {
 try {
   const configPath = path.join(stateDir, "home", ".openclaw", "openclaw.json");
   const settingsDir = path.join(stateDir, "home", ".openclaw", "settings");
-  await fs.mkdir(settingsDir, { recursive: true });
+  const homeDir = path.join(stateDir, "home");
+  const openClawDir = path.join(homeDir, ".openclaw");
+  await fs.mkdir(settingsDir, { mode: 0o777, recursive: true });
   await Promise.all([
-    fs.chown(stateDir, 1000, 1000),
-    fs.chown(path.join(stateDir, "home"), 1000, 1000),
-    fs.chown(path.join(stateDir, "home", ".openclaw"), 1000, 1000),
-    fs.chown(settingsDir, 1000, 1000),
+    fs.chmod(stateDir, 0o777),
+    fs.chmod(homeDir, 0o777),
+    fs.chmod(openClawDir, 0o777),
+    fs.chmod(settingsDir, 0o777),
   ]);
   await fs.writeFile(
     configPath,

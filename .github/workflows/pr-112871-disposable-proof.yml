@@ -18,7 +18,6 @@ env:
 jobs:
   proof:
     name: Isolated foreground Gateway proof
-    if: github.run_number == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -92,7 +91,7 @@ jobs:
 
           timeout --foreground --kill-after=30s 30s docker exec \
             "$container" \
-            bash -lc 'cp -r /candidate/. /tmp/work; mkdir -p /tmp/state'
+            bash -lc 'cp -r /candidate/. /tmp/work'
 
           timeout --foreground --kill-after=30s 5m docker exec \
             --env COREPACK_HOME=/cache/corepack \
