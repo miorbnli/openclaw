@@ -42,6 +42,7 @@ jobs:
 
           - Result: incomplete before candidate execution.
           EOF
+          printf '%s\n' '{"stage":"candidate preparation"}' > "$artifact_dir/proof-stage.json"
           echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
 
       - name: Checkout exact candidate without credentials
@@ -56,6 +57,7 @@ jobs:
           test "$(git -C "$candidate_dir" rev-parse HEAD)" = "$CANDIDATE_SHA"
           test -z "$(git -C "$candidate_dir" status --porcelain)"
           echo "CANDIDATE_DIR=$candidate_dir" >> "$GITHUB_ENV"
+          printf '%s\n' '{"stage":"candidate checkout verified"}' > "${{ steps.artifact.outputs.artifact_dir }}/proof-stage.json"
 
       - name: Run candidate in disposable constrained container
         id: sandbox
@@ -89,9 +91,11 @@ jobs:
             "$NODE_IMAGE" \
             bash -lc 'set -euo pipefail; exec sleep infinity')"
 
+          printf '%s\n' '{"stage":"sandbox created"}' > "$artifact_dir/proof-stage.json"
           timeout --foreground --kill-after=30s 30s docker exec \
             "$container" \
             bash -lc 'cp -r /candidate/. /tmp/work'
+          printf '%s\n' '{"stage":"candidate copied into sandbox"}' > "$artifact_dir/proof-stage.json"
 
           timeout --foreground --kill-after=30s 5m docker exec \
             --env COREPACK_HOME=/cache/corepack \
@@ -102,6 +106,7 @@ jobs:
               corepack prepare pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065 --activate
               corepack pnpm install --frozen-lockfile --ignore-scripts --config.ignore-pnpmfile=true --store-dir /cache/store
             ' >/dev/null 2>&1
+          printf '%s\n' '{"stage":"candidate dependencies installed"}' > "$artifact_dir/proof-stage.json"
 
           docker network disconnect bridge "$container"
           test "$(docker inspect --format '{{len .NetworkSettings.Networks}}' "$container")" = 0
@@ -115,6 +120,7 @@ jobs:
               corepack pnpm install --offline --frozen-lockfile --ignore-scripts --config.ignore-pnpmfile=true --store-dir /cache/store
               node scripts/run-node.mjs --help >/dev/null 2>&1
             '
+          printf '%s\n' '{"stage":"candidate runtime built offline"}' > "$artifact_dir/proof-stage.json"
 
           timeout --foreground --kill-after=30s 3m docker exec \
             --user root \
@@ -168,6 +174,7 @@ jobs:
           summary += f"- Candidate SHA: `{candidate_sha}`\n- Result: pass\n"
           summary += "\n".join(f"- {key}: pass" for key in sorted(assertions)) + "\n"
           (artifact_dir / "proof-summary.md").write_text(summary)
+          (artifact_dir / "proof-stage.json").unlink(missing_ok=True)
           PY
 
       - name: Publish trusted proof summary
