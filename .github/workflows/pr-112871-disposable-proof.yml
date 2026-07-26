@@ -106,6 +106,9 @@ jobs:
 
           timeout --foreground --kill-after=30s 5m docker exec \
             --env COREPACK_HOME=/cache/corepack \
+            --env HOME=/cache/home \
+            --env npm_config_cache=/cache/npm \
+            --env XDG_CACHE_HOME=/cache/xdg \
             "$container" \
             bash -lc 'cd /tmp/work && corepack pnpm install --frozen-lockfile --ignore-scripts --config.ignore-pnpmfile=true --store-dir /cache/store' \
             >/dev/null 2>&1
@@ -115,6 +118,9 @@ jobs:
           test "$(docker inspect --format '{{len .NetworkSettings.Networks}}' "$container")" = 0
 
           timeout --foreground --kill-after=30s 8m docker exec \
+            --env HOME=/cache/home \
+            --env npm_config_cache=/cache/npm \
+            --env XDG_CACHE_HOME=/cache/xdg \
             "$container" \
             bash -lc '
               set -euo pipefail
