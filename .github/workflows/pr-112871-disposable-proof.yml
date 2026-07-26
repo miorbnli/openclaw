@@ -1,12 +1,8 @@
 name: PR 112871 disposable Voice Wake proof
 
 on:
-  workflow_dispatch:
-    inputs:
-      candidate_sha:
-        description: Exact final PR head SHA
-        required: true
-        type: string
+  push:
+    branches: [proof/pr-112871-10008f1a324]
 
 permissions:
   contents: read
@@ -48,15 +44,6 @@ jobs:
           - Result: incomplete before candidate execution.
           EOF
           echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
-
-      - name: Validate exact candidate input
-        shell: bash
-        env:
-          REQUESTED_SHA: ${{ inputs.candidate_sha }}
-        run: |
-          set -euo pipefail
-          [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$REQUESTED_SHA" = "$CANDIDATE_SHA"
 
       - name: Checkout exact candidate without credentials
         shell: bash
