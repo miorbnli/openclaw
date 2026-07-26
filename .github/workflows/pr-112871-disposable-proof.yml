@@ -1,0 +1,199 @@
+name: PR 112871 disposable Voice Wake proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact final PR head SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-112871-disposable-proof-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: 10008f1a3247af8e103d3550e93c1ee8c32047fa
+  NODE_IMAGE: node@sha256:da81deb96d49fc84c9813bc4f16dfdb1d4d7e3671b74cd54fd944428f1444afe
+
+jobs:
+  proof:
+    name: Isolated foreground Gateway proof
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout temporary trusted harness
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prepare fixed-format artifact
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="$GITHUB_WORKSPACE/.artifacts/pr-112871-disposable-proof"
+          mkdir -p "$artifact_dir"
+          cat > "$artifact_dir/proof-manifest.json" <<'EOF'
+          {"schema":1,"pr":112871,"result":"incomplete"}
+          EOF
+          cat > "$artifact_dir/proof-summary.md" <<'EOF'
+          # PR 112871 disposable Voice Wake proof
+
+          - Result: incomplete before candidate execution.
+          EOF
+          echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Validate exact candidate input
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$REQUESTED_SHA" = "$CANDIDATE_SHA"
+
+      - name: Checkout exact candidate without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_dir="$RUNNER_TEMP/pr-112871-candidate"
+          git init "$candidate_dir"
+          git -C "$candidate_dir" remote add origin https://github.com/miorbnli/openclaw.git
+          git -C "$candidate_dir" -c protocol.version=2 fetch --depth=1 --no-tags origin "$CANDIDATE_SHA"
+          git -C "$candidate_dir" checkout --detach FETCH_HEAD
+          test "$(git -C "$candidate_dir" rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git -C "$candidate_dir" status --porcelain)"
+          echo "CANDIDATE_DIR=$candidate_dir" >> "$GITHUB_ENV"
+
+      - name: Run candidate in disposable constrained container
+        id: sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          harness_path="$GITHUB_WORKSPACE/tools/pr-112871-proof-harness.mjs"
+          artifact_dir="${{ steps.artifact.outputs.artifact_dir }}"
+          harness_sha="$(sha256sum "$harness_path" | cut -d' ' -f1)"
+          container=""
+          cleanup() {
+            if [[ -n "$container" ]]; then
+              docker rm --force "$container" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          container="$(docker run --detach \
+            --network bridge \
+            --read-only \
+            --cap-drop ALL \
+            --cpus 2 \
+            --memory 4g \
+            --pids-limit 256 \
+            --security-opt no-new-privileges \
+            --tmpfs /cache:rw,exec,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=1777 \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,size=2g,uid=1000,gid=1000,mode=1777 \
+            --user 1000:1000 \
+            --mount "type=bind,src=$CANDIDATE_DIR,dst=/candidate,readonly" \
+            --mount "type=bind,src=$harness_path,dst=/trusted/harness.mjs,readonly" \
+            "$NODE_IMAGE" \
+            bash -lc 'set -euo pipefail; exec sleep infinity')"
+
+          timeout --foreground --kill-after=30s 30s docker exec \
+            "$container" \
+            bash -lc 'cp -r /candidate/. /tmp/work; mkdir -p /tmp/state'
+
+          timeout --foreground --kill-after=30s 5m docker exec \
+            --env COREPACK_HOME=/cache/corepack \
+            "$container" \
+            bash -lc '
+              set -euo pipefail
+              cd /tmp/work
+              corepack prepare pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065 --activate
+              corepack pnpm install --frozen-lockfile --ignore-scripts --config.ignore-pnpmfile=true --store-dir /cache/store
+            ' >/dev/null 2>&1
+
+          docker network disconnect bridge "$container"
+          test "$(docker inspect --format '{{len .NetworkSettings.Networks}}' "$container")" = 0
+
+          timeout --foreground --kill-after=30s 8m docker exec \
+            "$container" \
+            bash -lc '
+              set -euo pipefail
+              cd /tmp/work
+              export COREPACK_HOME=/cache/corepack
+              corepack pnpm install --offline --frozen-lockfile --ignore-scripts --config.ignore-pnpmfile=true --store-dir /cache/store
+              node scripts/run-node.mjs --help >/dev/null 2>&1
+            '
+
+          timeout --foreground --kill-after=30s 3m docker exec \
+            --user root \
+            --env PROOF_CANDIDATE_DIR=/tmp/work \
+            --env PROOF_CANDIDATE_SHA="$CANDIDATE_SHA" \
+            --env PROOF_STATE_DIR=/tmp/state \
+            --env PROOF_WORKFLOW_SHA="$GITHUB_SHA" \
+            "$container" \
+            node --disable-sigusr1 /trusted/harness.mjs > "$RUNNER_TEMP/pr-112871-proof.json"
+
+          python3 - "$RUNNER_TEMP/pr-112871-proof.json" "$artifact_dir" "$harness_sha" "$GITHUB_SHA" "$CANDIDATE_SHA" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          proof_path = Path(sys.argv[1])
+          artifact_dir = Path(sys.argv[2])
+          harness_sha, workflow_sha, candidate_sha = sys.argv[3:]
+          if proof_path.stat().st_size > 8192:
+              raise SystemExit("sandbox proof output exceeds fixed bound")
+          source = json.loads(proof_path.read_text())
+          expected = {
+              "firstReady",
+              "secondReady",
+              "canonicalSqlitePreserved",
+              "legacySourcesRetired",
+              "receiptsPrivate0600",
+              "ownedGatewayStopped",
+          }
+          assertions = source.get("assertions")
+          if set(assertions or {}) != expected or not all(value is True for value in assertions.values()):
+              raise SystemExit("sandbox proof assertions failed")
+          if source.get("candidateSha") != candidate_sha or source.get("workflowSha") != workflow_sha:
+              raise SystemExit("sandbox proof identity mismatch")
+          if source.get("harnessSha256") != harness_sha:
+              raise SystemExit("sandbox harness digest mismatch")
+          normalized = {
+              "schema": 1,
+              "pr": 112871,
+              "candidateRepository": "miorbnli/openclaw",
+              "candidateSha": candidate_sha,
+              "workflowRepository": "miorbnli/openclaw",
+              "workflowSha": workflow_sha,
+              "harnessSha256": harness_sha,
+              "result": "pass",
+              "assertions": assertions,
+          }
+          artifact_dir.mkdir(parents=True, exist_ok=True)
+          (artifact_dir / "proof-manifest.json").write_text(json.dumps(normalized, indent=2) + "\n")
+          summary = "# PR 112871 disposable Voice Wake proof\n\n"
+          summary += f"- Candidate SHA: `{candidate_sha}`\n- Result: pass\n"
+          summary += "\n".join(f"- {key}: pass" for key in sorted(assertions)) + "\n"
+          (artifact_dir / "proof-summary.md").write_text(summary)
+          PY
+
+      - name: Publish trusted proof summary
+        if: ${{ always() && steps.artifact.outputs.artifact_dir != '' }}
+        shell: bash
+        run: cat "${{ steps.artifact.outputs.artifact_dir }}/proof-summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload disposable proof artifact
+        if: ${{ always() && steps.artifact.outputs.artifact_dir != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pr-112871-voicewake-proof-10008f1a3247af8e103d3550e93c1ee8c32047fa-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.artifact.outputs.artifact_dir }}
+          if-no-files-found: error
+          retention-days: 1
