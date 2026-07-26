@@ -80,11 +80,11 @@ jobs:
             --read-only \
             --cap-drop ALL \
             --cpus 2 \
-            --memory 4g \
+            --memory 6g \
             --pids-limit 256 \
             --security-opt no-new-privileges \
-            --tmpfs /cache:rw,exec,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=1777 \
-            --tmpfs /tmp:rw,exec,nosuid,nodev,size=2g,uid=1000,gid=1000,mode=1777 \
+            --tmpfs /cache:rw,exec,nosuid,nodev,size=2g,uid=1000,gid=1000,mode=1777 \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,size=3g,uid=1000,gid=1000,mode=1777 \
             --user 1000:1000 \
             --mount "type=bind,src=$CANDIDATE_DIR,dst=/candidate,readonly" \
             --mount "type=bind,src=$harness_path,dst=/trusted/harness.mjs,readonly" \
